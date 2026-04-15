@@ -1,150 +1,96 @@
-<!DOCTYPE html>
-<html lang="sv">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tegskiftet Dashboard</title>
-    <style>
-        body { background: #000; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-        .main-display { text-align: center; margin-bottom: 30px; }
-        .label { font-size: 1.5rem; color: #555; text-transform: uppercase; letter-spacing: 3px; }
-        .value-large { font-size: 15rem; font-weight: 900; color: #00ff88; line-height: 0.8; }
-        .unit-large { font-size: 3rem; color: #00ff88; }
-        .stats-grid { display: flex; gap: 20px; border-top: 1px solid #111; padding-top: 20px; width: 95%; justify-content: space-around; }
-        .stat-box { text-align: center; background: #080808; padding: 25px; border-radius: 15px; min-width: 200px; border: 1px solid #111; }
-        .stat-label { font-size: 1rem; color: #666; text-transform: uppercase; margin-bottom: 10px; letter-spacing: 1px; }
-        .stat-value { font-size: 4rem; font-weight: bold; color: #fff; }
-        .stat-unit { font-size: 1.2rem; color: #444; margin-left: 5px; }
-        .footer { position: fixed; bottom: 15px; color: #444; font-size: 1rem; background: rgba(0,0,0,0.8); padding: 5px 20px; border-radius: 20px; }
-    </style>
-</head>
-<body>
+<script>
+    const CONFIG = {
+        account: 'tegskiftetlandskrona@gmail.com',
+        password: 'Tegskiftet1',
+        systemId: 'EPTWN1772141873',
+        serial: 'CMU110A22640030',
+        apiBase: 'https://eu5.sigencloud.com/openapi', 
+        proxy: 'https://api.allorigins.win/get?url='
+    };
 
-    <div class="main-display">
-        <div class="label">Produktion Just Nu</div>
-        <div id="current-prod" class="value-large">0.0</div>
-        <div class="unit-large">kW</div>
-    </div>
+    let authToken = "";
 
-    <div class="stats-grid">
-        <div class="stat-box">
-            <div class="stat-label">Idag</div>
-            <div><span id="stat-day" class="stat-value">0</span><span class="stat-unit">kWh</span></div>
-        </div>
-        <div class="stat-box">
-            <div class="stat-label">Vecka</div>
-            <div><span id="stat-week" class="stat-value">0</span><span class="stat-unit">kWh</span></div>
-        </div>
-        <div class="stat-box">
-            <div class="stat-label">Månad</div>
-            <div><span id="stat-month" class="stat-value">0</span><span class="stat-unit">kWh</span></div>
-        </div>
-    </div>
+    function updateStatus(msg) {
+        document.getElementById('status-text').innerText = msg;
+    }
 
-    <div id="status-text" class="footer">Initierar systemet...</div>
+    // En hjälpfunktion för att anropa genom AllOrigins-proxyn
+    async function proxyFetch(targetUrl, method = 'GET', body = null) {
+        const fullUrl = CONFIG.proxy + encodeURIComponent(targetUrl);
+        const headers = { 'Accept': 'application/json' };
+        if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
 
-    <script>
-        const CONFIG = {
-            account: 'tegskiftetlandskrona@gmail.com',
-            password: 'Tegskiftet1',
-            systemId: 'EPTWN1772141873',
-            serial: 'CMU110A22640030',
-            apiBase: 'https://eu5.sigencloud.com/openapi', 
-            proxy: 'https://corsproxy.io/?'
-        };
-
-        let authToken = "";
-
-        function updateStatus(msg) {
-            document.getElementById('status-text').innerText = msg;
+        const options = { method: method, headers: headers };
+        if (body) {
+            options.method = 'POST';
+            options.headers['Content-Type'] = 'application/json';
+            options.body = JSON.stringify(body);
         }
 
-        async function login() {
-            updateStatus("Loggar in på SigenCloud...");
-            try {
-                const url = CONFIG.proxy + encodeURIComponent(CONFIG.apiBase + '/auth/login/password');
-                const response = await fetch(url, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        account: CONFIG.account, 
-                        password: CONFIG.password 
-                    })
-                });
-                const res = await response.json();
-                if (res.data && res.data.token) {
-                    authToken = res.data.token;
-                    return true;
-                } else {
-                    updateStatus("Login misslyckades: " + (res.msg || "Fel uppgifter"));
-                    return false;
-                }
-            } catch (e) {
-                updateStatus("Kunde inte nå login (Proxy-fel?)");
+        const response = await fetch(fullUrl);
+        const wrapper = await response.json();
+        // AllOrigins lägger det riktiga svaret som en sträng i "contents"
+        return JSON.parse(wrapper.contents);
+    }
+
+    async function login() {
+        updateStatus("Loggar in via AllOrigins...");
+        try {
+            const res = await proxyFetch(CONFIG.apiBase + '/auth/login/password', 'POST', {
+                account: CONFIG.account,
+                password: CONFIG.password
+            });
+            
+            if (res && res.data && res.data.token) {
+                authToken = res.data.token;
+                return true;
+            } else {
+                updateStatus("Login misslyckades: Kolla lösenord");
                 return false;
             }
+        } catch (e) {
+            updateStatus("Proxyn svarar inte. Vänta...");
+            return false;
+        }
+    }
+
+    async function updateData() {
+        if (!authToken) {
+            const loggedIn = await login();
+            if (!loggedIn) return;
         }
 
-        async function updateData() {
-            if (!authToken) {
-                const loggedIn = await login();
-                if (!loggedIn) return;
+        try {
+            // 1. Realtid
+            updateStatus("Hämtar effekt...");
+            const realRes = await proxyFetch(CONFIG.apiBase + '/systems/' + CONFIG.systemId + '/devices/' + CONFIG.serial + '/realtimeInfo');
+            if (realRes && realRes.data) {
+                const kw = (realRes.data.pvPower || 0).toFixed(1);
+                document.getElementById('current-prod').innerText = kw;
             }
 
-            // 1. Hämta Realtid
-            try {
-                updateStatus("Hämtar realtidsdata...");
-                const realUrl = CONFIG.proxy + encodeURIComponent(CONFIG.apiBase + '/systems/' + CONFIG.systemId + '/devices/' + CONFIG.serial + '/realtimeInfo');
-                const response = await fetch(realUrl, { 
-                    headers: { 'Authorization': 'Bearer ' + authToken } 
-                });
-                
-                if (response.status === 401) {
-                    authToken = "";
-                    return;
-                }
+            // 2. Statistik
+            updateStatus("Hämtar statistik...");
+            const statRes = await proxyFetch(CONFIG.apiBase + '/systems/' + CONFIG.systemId + '/energy/statistics?type=day');
+            const list = statRes.data?.itemList || [];
+            
+            if (list.length > 0) {
+                const getVal = (item) => item.powerGeneration || 0;
+                const today = getVal(list[list.length - 1]);
+                const week = list.slice(-7).reduce((acc, curr) => acc + getVal(curr), 0);
+                const month = list.slice(-30).reduce((acc, curr) => acc + getVal(curr), 0);
 
-                const res = await response.json();
-                if (res.data) {
-                    const kw = (res.data.pvPower || 0).toFixed(1);
-                    document.getElementById('current-prod').innerText = kw;
-                }
-            } catch (e) {
-                updateStatus("Fel vid realtidsuppdatering");
+                document.getElementById('stat-day').innerText = Math.round(today);
+                document.getElementById('stat-week').innerText = Math.round(week);
+                document.getElementById('stat-month').innerText = Math.round(month);
+                updateStatus("Uppdaterat: " + new Date().toLocaleTimeString());
             }
-
-            // 2. Hämta Statistik
-            try {
-                updateStatus("Hämtar statistik...");
-                const statUrl = CONFIG.proxy + encodeURIComponent(CONFIG.apiBase + '/systems/' + CONFIG.systemId + '/energy/statistics?type=day');
-                const response = await fetch(statUrl, { 
-                    headers: { 'Authorization': 'Bearer ' + authToken } 
-                });
-                const res = await response.json();
-                
-                const list = res.data?.itemList || res.data || [];
-                
-                if (Array.isArray(list) && list.length > 0) {
-                    const getVal = (item) => item.powerGeneration || 0;
-                    const today = getVal(list[list.length - 1]);
-                    const week = list.slice(-7).reduce((acc, curr) => acc + getVal(curr), 0);
-                    const month = list.slice(-30).reduce((acc, curr) => acc + getVal(curr), 0);
-
-                    document.getElementById('stat-day').innerText = Math.round(today);
-                    document.getElementById('stat-week').innerText = Math.round(week);
-                    document.getElementById('stat-month').innerText = Math.round(month);
-                    updateStatus("Senast uppdaterat: " + new Date().toLocaleTimeString());
-                } else {
-                    updateStatus("Ingen historisk data hittades");
-                }
-            } catch (e) {
-                updateStatus("Fel vid statistikuppdatering");
-            }
+        } catch (e) {
+            updateStatus("Nätverksfel. Försöker igen om 30s.");
+            authToken = ""; // Nollställ token vid fel för säkerhets skull
         }
+    }
 
-        // Start
-        updateData();
-        setInterval(updateData, 30000);
-    </script>
-</body>
-</html>
+    updateData();
+    setInterval(updateData, 30000);
+</script>
