@@ -1,114 +1,38 @@
-<!DOCTYPE html>
-<html lang="sv">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tegskiftet Dashboard</title>
-    <style>
-        body { background: #000; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; overflow: hidden; }
-        .main-display { text-align: center; margin-bottom: 30px; }
-        .label { font-size: 1.5rem; color: #444; text-transform: uppercase; letter-spacing: 3px; }
-        .value-large { font-size: 15rem; font-weight: 900; color: #00ff88; line-height: 0.8; }
-        .unit-large { font-size: 3rem; color: #00ff88; }
-        .stats-grid { display: flex; gap: 20px; border-top: 1px solid #111; padding-top: 25px; width: 95%; justify-content: space-around; }
-        .stat-box { text-align: center; background: #080808; padding: 20px; border-radius: 15px; min-width: 180px; border: 1px solid #111; }
-        .stat-label { font-size: 0.9rem; color: #666; text-transform: uppercase; margin-bottom: 8px; }
-        .stat-value { font-size: 3.5rem; font-weight: bold; color: #fff; }
-        .stat-unit { font-size: 1rem; color: #333; margin-left: 5px; }
-        .footer { position: fixed; bottom: 20px; color: #555; font-size: 1rem; background: #111; padding: 5px 20px; border-radius: 20px; }
-    </style>
-</head>
-<body>
+<script>
+    // ... (behåll samma CONFIG som innan)
 
-    <div class="main-display">
-        <div class="label">Produktion Just Nu</div>
-        <div id="current-prod" class="value-large">0.0</div>
-        <div class="unit-large">kW</div>
-    </div>
-
-    <div class="stats-grid">
-        <div class="stat-box">
-            <div class="stat-label">Idag</div>
-            <div><span id="stat-day" class="stat-value">0</span><span class="stat-unit">kWh</span></div>
-        </div>
-        <div class="stat-box">
-            <div class="stat-label">7 dagar</div>
-            <div><span id="stat-week" class="stat-value">0</span><span class="stat-unit">kWh</span></div>
-        </div>
-        <div class="stat-box">
-            <div class="stat-label">30 dagar</div>
-            <div><span id="stat-month" class="stat-value">0</span><span class="stat-unit">kWh</span></div>
-        </div>
-    </div>
-
-    <div id="status-text" class="footer">Ansluter via Netlify Proxy...</div>
-
-    <script>
-        const CONFIG = {
-            account: 'tegskiftetlandskrona@gmail.com',
-            password: 'Tegskiftet1',
-            systemId: 'EPTWN1772141873',
-            serial: 'CMU110A22640030'
-        };
-
-        let authToken = "";
-
-        async function sigenRequest(path, method = 'GET', data = null) {
-            // Vi använder /api/ som går via Netlifys server-tunnel
-            const url = '/api' + path; 
-            const headers = {
-                'Accept': 'application/json',
-                'Content-Type': 'application/json'
-            };
-            if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
-
+    async function sigenRequest(path, method = 'GET', data = null) {
+        const url = '/api' + path; 
+        try {
             const response = await fetch(url, {
                 method: method,
-                headers: headers,
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                    ...(authToken ? { 'Authorization': 'Bearer ' + authToken } : {})
+                },
                 body: data ? JSON.stringify(data) : null
             });
 
-            if (!response.ok) throw new Error("Server svarade inte");
-            return await response.json();
-        }
-
-        async function update() {
-            try {
-                if (!authToken) {
-                    const loginRes = await sigenRequest('/auth/login/password', 'POST', {
-                        account: CONFIG.account,
-                        password: CONFIG.password
-                    });
-                    if (loginRes.data && loginRes.data.token) {
-                        authToken = loginRes.data.token;
-                    }
-                }
-
-                const realRes = await sigenRequest('/systems/' + CONFIG.systemId + '/devices/' + CONFIG.serial + '/realtimeInfo');
-                if (realRes.data) {
-                    document.getElementById('current-prod').innerText = (realRes.data.pvPower || 0).toFixed(1);
-                }
-
-                const statRes = await sigenRequest('/systems/' + CONFIG.systemId + '/energy/statistics?type=day');
-                const list = statRes.data?.itemList || [];
-                
-                if (list.length > 0) {
-                    const getVal = (i) => i.powerGeneration || 0;
-                    document.getElementById('stat-day').innerText = Math.round(getVal(list[list.length - 1]));
-                    document.getElementById('stat-week').innerText = Math.round(list.slice(-7).reduce((a, b) => a + getVal(b), 0));
-                    document.getElementById('stat-month').innerText = Math.round(list.slice(-30).reduce((a, b) => a + getVal(b), 0));
-                }
-
-                document.getElementById('status-text').innerText = "Uppdaterat: " + new Date().toLocaleTimeString();
-
-            } catch (e) {
-                document.getElementById('status-text').innerText = "Väntar på tunnel...";
-                authToken = "";
+            if (response.status === 404) {
+                throw new Error("404: Redirect-filen hittas inte av Netlify");
             }
-        }
+            if (!response.ok) {
+                throw new Error("HTTP " + response.status + " via tunneln");
+            }
 
-        update();
-        setInterval(update, 30000);
-    </script>
-</body>
-</html>
+            return await response.json();
+        } catch (e) {
+            throw e;
+        }
+    }
+
+    async function update() {
+        try {
+            // ... (resten av update-logiken)
+        } catch (e) {
+            document.getElementById('status-text').innerText = "Fel: " + e.message;
+            console.error(e);
+        }
+    }
+</script>
