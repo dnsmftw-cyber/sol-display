@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tegskiftet - Direktanslutning</title>
+    <title>Tegskiftet Dashboard</title>
     <style>
-        body { background: #000; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+        body { background: #000; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; overflow: hidden; }
         .main-display { text-align: center; margin-bottom: 30px; }
         .label { font-size: 1.5rem; color: #444; text-transform: uppercase; letter-spacing: 3px; }
         .value-large { font-size: 15rem; font-weight: 900; color: #00ff88; line-height: 0.8; }
@@ -41,21 +41,21 @@
         </div>
     </div>
 
-    <div id="status-text" class="footer">Testar direktanslutning...</div>
+    <div id="status-text" class="footer">Ansluter via Netlify Proxy...</div>
 
     <script>
         const CONFIG = {
             account: 'tegskiftetlandskrona@gmail.com',
             password: 'Tegskiftet1',
             systemId: 'EPTWN1772141873',
-            serial: 'CMU110A22640030',
-            apiBase: 'https://eu5.sigencloud.com/openapi'
+            serial: 'CMU110A22640030'
         };
 
         let authToken = "";
 
         async function sigenRequest(path, method = 'GET', data = null) {
-            const url = CONFIG.apiBase + path;
+            // Vi använder /api/ som går via Netlifys server-tunnel
+            const url = '/api' + path; 
             const headers = {
                 'Accept': 'application/json',
                 'Content-Type': 'application/json'
@@ -65,17 +65,16 @@
             const response = await fetch(url, {
                 method: method,
                 headers: headers,
-                mode: 'cors', // Vi ber uttryckligen om CORS-läge
                 body: data ? JSON.stringify(data) : null
             });
 
+            if (!response.ok) throw new Error("Server svarade inte");
             return await response.json();
         }
 
         async function update() {
             try {
                 if (!authToken) {
-                    document.getElementById('status-text').innerText = "Loggar in direkt...";
                     const loginRes = await sigenRequest('/auth/login/password', 'POST', {
                         account: CONFIG.account,
                         password: CONFIG.password
@@ -85,13 +84,11 @@
                     }
                 }
 
-                // Hämta Realtid
                 const realRes = await sigenRequest('/systems/' + CONFIG.systemId + '/devices/' + CONFIG.serial + '/realtimeInfo');
                 if (realRes.data) {
                     document.getElementById('current-prod').innerText = (realRes.data.pvPower || 0).toFixed(1);
                 }
 
-                // Hämta Statistik
                 const statRes = await sigenRequest('/systems/' + CONFIG.systemId + '/energy/statistics?type=day');
                 const list = statRes.data?.itemList || [];
                 
@@ -102,11 +99,11 @@
                     document.getElementById('stat-month').innerText = Math.round(list.slice(-30).reduce((a, b) => a + getVal(b), 0));
                 }
 
-                document.getElementById('status-text').innerText = "Direktanslutning OK: " + new Date().toLocaleTimeString();
+                document.getElementById('status-text').innerText = "Uppdaterat: " + new Date().toLocaleTimeString();
 
             } catch (e) {
-                document.getElementById('status-text').innerText = "Direktanslutning misslyckades: CORS-blockering";
-                console.error(e);
+                document.getElementById('status-text').innerText = "Väntar på tunnel...";
+                authToken = "";
             }
         }
 
