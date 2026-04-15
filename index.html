@@ -15,7 +15,7 @@
         .stat-label { font-size: 1rem; color: #666; text-transform: uppercase; margin-bottom: 10px; letter-spacing: 1px; }
         .stat-value { font-size: 4rem; font-weight: bold; color: #fff; }
         .stat-unit { font-size: 1.2rem; color: #444; margin-left: 5px; }
-        .footer { position: fixed; bottom: 15px; color: #222; font-size: 0.9rem; }
+        .footer { position: fixed; bottom: 15px; color: #444; font-size: 1rem; background: rgba(0,0,0,0.8); padding: 5px 20px; border-radius: 20px; }
     </style>
 </head>
 <body>
@@ -29,19 +29,19 @@
     <div class="stats-grid">
         <div class="stat-box">
             <div class="stat-label">Idag</div>
-            <div><span id="stat-day" class="stat-value">-</span><span class="stat-unit">kWh</span></div>
+            <div><span id="stat-day" class="stat-value">0</span><span class="stat-unit">kWh</span></div>
         </div>
         <div class="stat-box">
-            <div class="stat-label">Senaste 7 dagarna</div>
-            <div><span id="stat-week" class="stat-value">-</span><span class="stat-unit">kWh</span></div>
+            <div class="stat-label">Vecka</div>
+            <div><span id="stat-week" class="stat-value">0</span><span class="stat-unit">kWh</span></div>
         </div>
         <div class="stat-box">
-            <div class="stat-label">Senaste 30 dagarna</div>
-            <div><span id="stat-month" class="stat-value">-</span><span class="stat-unit">kWh</span></div>
+            <div class="stat-label">Månad</div>
+            <div><span id="stat-month" class="stat-value">0</span><span class="stat-unit">kWh</span></div>
         </div>
     </div>
 
-    <div id="timestamp" class="footer">Ansluter till Brf Tegskiftet...</div>
+    <div id="status-text" class="footer">Initierar systemet...</div>
 
     <script>
         const CONFIG = {
@@ -55,26 +55,96 @@
 
         let authToken = "";
 
+        function updateStatus(msg) {
+            document.getElementById('status-text').innerText = msg;
+        }
+
         async function login() {
+            updateStatus("Loggar in på SigenCloud...");
             try {
                 const url = CONFIG.proxy + encodeURIComponent(CONFIG.apiBase + '/auth/login/password');
                 const response = await fetch(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ account: CONFIG.account, password: CONFIG.password })
+                    body: JSON.stringify({ 
+                        account: CONFIG.account, 
+                        password: CONFIG.password 
+                    })
                 });
                 const res = await response.json();
                 if (res.data && res.data.token) {
                     authToken = res.data.token;
                     return true;
+                } else {
+                    updateStatus("Login misslyckades: " + (res.msg || "Fel uppgifter"));
+                    return false;
                 }
-            } catch (e) { console.error("Login fail", e); }
-            return false;
+            } catch (e) {
+                updateStatus("Kunde inte nå login (Proxy-fel?)");
+                return false;
+            }
         }
 
         async function updateData() {
-            if (!authToken && !(await login())) return;
+            if (!authToken) {
+                const loggedIn = await login();
+                if (!loggedIn) return;
+            }
 
+            // 1. Hämta Realtid
             try {
-                // 1. REALTIDSINFO (kW)
-                const realUrl = CONFIG.proxy + encodeURIComponent(CONFIG.api
+                updateStatus("Hämtar realtidsdata...");
+                const realUrl = CONFIG.proxy + encodeURIComponent(CONFIG.apiBase + '/systems/' + CONFIG.systemId + '/devices/' + CONFIG.serial + '/realtimeInfo');
+                const response = await fetch(realUrl, { 
+                    headers: { 'Authorization': 'Bearer ' + authToken } 
+                });
+                
+                if (response.status === 401) {
+                    authToken = "";
+                    return;
+                }
+
+                const res = await response.json();
+                if (res.data) {
+                    const kw = (res.data.pvPower || 0).toFixed(1);
+                    document.getElementById('current-prod').innerText = kw;
+                }
+            } catch (e) {
+                updateStatus("Fel vid realtidsuppdatering");
+            }
+
+            // 2. Hämta Statistik
+            try {
+                updateStatus("Hämtar statistik...");
+                const statUrl = CONFIG.proxy + encodeURIComponent(CONFIG.apiBase + '/systems/' + CONFIG.systemId + '/energy/statistics?type=day');
+                const response = await fetch(statUrl, { 
+                    headers: { 'Authorization': 'Bearer ' + authToken } 
+                });
+                const res = await response.json();
+                
+                const list = res.data?.itemList || res.data || [];
+                
+                if (Array.isArray(list) && list.length > 0) {
+                    const getVal = (item) => item.powerGeneration || 0;
+                    const today = getVal(list[list.length - 1]);
+                    const week = list.slice(-7).reduce((acc, curr) => acc + getVal(curr), 0);
+                    const month = list.slice(-30).reduce((acc, curr) => acc + getVal(curr), 0);
+
+                    document.getElementById('stat-day').innerText = Math.round(today);
+                    document.getElementById('stat-week').innerText = Math.round(week);
+                    document.getElementById('stat-month').innerText = Math.round(month);
+                    updateStatus("Senast uppdaterat: " + new Date().toLocaleTimeString());
+                } else {
+                    updateStatus("Ingen historisk data hittades");
+                }
+            } catch (e) {
+                updateStatus("Fel vid statistikuppdatering");
+            }
+        }
+
+        // Start
+        updateData();
+        setInterval(updateData, 30000);
+    </script>
+</body>
+</html>
