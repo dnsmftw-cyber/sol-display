@@ -5,43 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Tegskiftet Dashboard</title>
     <style>
-        body { 
-            background: #000; 
-            color: #fff; 
-            font-family: sans-serif; 
-            display: flex; 
-            flex-direction: column; 
-            align-items: center; 
-            justify-content: center; 
-            height: 100vh; 
-            margin: 0;
-        }
-        .main-display { text-align: center; margin-bottom: 40px; }
-        .label { font-size: 1.5rem; color: #666; text-transform: uppercase; letter-spacing: 3px; }
-        .value-large { font-size: 12rem; font-weight: 900; color: #00ff88; line-height: 1; }
+        body { background: #000; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+        .main-display { text-align: center; margin-bottom: 30px; }
+        .label { font-size: 1.5rem; color: #555; text-transform: uppercase; letter-spacing: 3px; }
+        .value-large { font-size: 15rem; font-weight: 900; color: #00ff88; line-height: 0.8; }
         .unit-large { font-size: 3rem; color: #00ff88; }
-
-        /* De nya raderna */
-        .stats-grid { 
-            display: flex; 
-            gap: 40px; 
-            border-top: 1px solid #222; 
-            padding-top: 30px;
-            width: 80%;
-            justify-content: space-around;
-        }
-        .stat-box { text-align: center; }
-        .stat-label { font-size: 1rem; color: #888; text-transform: uppercase; margin-bottom: 5px; }
+        .stats-grid { display: flex; gap: 20px; border-top: 1px solid #111; padding-top: 20px; width: 90%; justify-content: space-around; }
+        .stat-box { text-align: center; background: #080808; padding: 20px; border-radius: 10px; min-width: 180px; }
+        .stat-label { font-size: 0.9rem; color: #666; text-transform: uppercase; margin-bottom: 5px; }
         .stat-value { font-size: 3.5rem; font-weight: bold; color: #fff; }
-        .stat-unit { font-size: 1.2rem; color: #fff; opacity: 0.6; }
-
-        .footer { position: fixed; bottom: 15px; color: #333; font-size: 0.8rem; }
+        .stat-unit { font-size: 1rem; color: #444; }
+        .footer { position: fixed; bottom: 10px; color: #222; font-size: 0.8rem; }
     </style>
 </head>
 <body>
 
     <div class="main-display">
-        <div class="label">Just nu</div>
+        <div class="label">Produktion Just Nu</div>
         <div id="current-prod" class="value-large">0.0</div>
         <div class="unit-large">kW</div>
     </div>
@@ -49,15 +29,15 @@
     <div class="stats-grid">
         <div class="stat-box">
             <div class="stat-label">Idag</div>
-            <div><span id="stat-day" class="stat-value">0</span> <span class="stat-unit">kWh</span></div>
+            <div><span id="stat-day" class="stat-value">-</span> <span class="stat-unit">kWh</span></div>
         </div>
         <div class="stat-box">
             <div class="stat-label">Vecka</div>
-            <div><span id="stat-week" class="stat-value">0</span> <span class="stat-unit">kWh</span></div>
+            <div><span id="stat-week" class="stat-value">-</span> <span class="stat-unit">kWh</span></div>
         </div>
         <div class="stat-box">
             <div class="stat-label">Månad</div>
-            <div><span id="stat-month" class="stat-value">0</span> <span class="stat-unit">kWh</span></div>
+            <div><span id="stat-month" class="stat-value">-</span> <span class="stat-unit">kWh</span></div>
         </div>
     </div>
 
@@ -75,67 +55,65 @@
 
         let authToken = "";
 
-        async function apiRequest(endpoint, method = 'GET', body = null) {
-            const url = CONFIG.proxy + encodeURIComponent(CONFIG.apiBase + endpoint);
-            const options = {
-                method: method,
-                headers: { 'Content-Type': 'application/json' }
-            };
-            if (authToken) options.headers['Authorization'] = 'Bearer ' + authToken;
-            if (body) options.body = JSON.stringify(body);
-            
-            const response = await fetch(url, options);
-            if (response.status === 401) { authToken = ""; return null; }
-            return await response.json();
-        }
-
         async function login() {
-            const res = await apiRequest('/auth/login/password', 'POST', {
-                account: CONFIG.account,
-                password: CONFIG.password
-            });
-            if (res && res.data && res.data.token) {
-                authToken = res.data.token;
-                return true;
-            }
+            try {
+                const url = CONFIG.proxy + encodeURIComponent(CONFIG.apiBase + '/auth/login/password');
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ account: CONFIG.account, password: CONFIG.password })
+                });
+                const res = await response.json();
+                if (res.data && res.data.token) {
+                    authToken = res.data.token;
+                    return true;
+                }
+            } catch (e) { console.error("Login fail", e); }
             return false;
         }
 
-        async function updateStats() {
+        async function updateData() {
             if (!authToken && !(await login())) return;
 
-            // 1. Hämta realtidsinfo (kW just nu)
-            const realRes = await apiRequest('/systems/' + CONFIG.systemId + '/devices/' + CONFIG.serial + '/realtimeInfo');
-            if (realRes && realRes.data) {
-                const kw = ((realRes.data.p_pv || 0) / 1000).toFixed(1);
-                document.getElementById('current-prod').innerText = kw;
-            }
-
-            // 2. Hämta statistik (kWh över tid)
-            // Vi hämtar dygnsstatistik för att räkna ut dag, vecka, månad
-            const statRes = await apiRequest('/systems/' + CONFIG.systemId + '/energy/statistics?type=day');
-            if (statRes && statRes.data) {
-                // Här behöver vi titta på hur Sigenergy strukturerar sin lista.
-                // Vi antar här att den skickar en lista med de senaste dagarna.
-                const days = statRes.data || [];
+            try {
+                // 1. Hämta realtidsinfo för stora siffran
+                const realUrl = CONFIG.proxy + encodeURIComponent(CONFIG.apiBase + '/systems/' + CONFIG.systemId + '/devices/' + CONFIG.serial + '/realtimeInfo');
+                const realRes = await fetch(realUrl, { headers: { 'Authorization': 'Bearer ' + authToken } }).then(r => r.json());
                 
-                // Idag (sista elementet i listan)
-                const todayVal = days.length > 0 ? (days[days.length - 1].yieldEnergy || 0) : 0;
-                document.getElementById('stat-day').innerText = Math.round(todayVal);
+                if (realRes.data) {
+                    // Enligt din dokumentation heter det pvPower och är redan i kW
+                    const kw = (realRes.data.pvPower || 0).toFixed(1);
+                    document.getElementById('current-prod').innerText = kw;
+                }
 
-                // Enkel summering för vecka (senaste 7) och månad (senaste 30)
-                const weekSum = days.slice(-7).reduce((acc, curr) => acc + (curr.yieldEnergy || 0), 0);
-                const monthSum = days.slice(-30).reduce((acc, curr) => acc + (curr.yieldEnergy || 0), 0);
+                // 2. Hämta statistik (kWh)
+                const statUrl = CONFIG.proxy + encodeURIComponent(CONFIG.apiBase + '/systems/' + CONFIG.systemId + '/energy/statistics?type=day');
+                const statRes = await fetch(statUrl, { headers: { 'Authorization': 'Bearer ' + authToken } }).then(r => r.json());
+                
+                // Vi försöker hitta listan i svaret (kan ligga i res.data eller res.data.list)
+                const list = statRes.data?.list || statRes.data || [];
+                
+                if (Array.isArray(list) && list.length > 0) {
+                    // Vi letar efter fältet för energi (troligen yieldEnergy eller ePv)
+                    const getVal = (obj) => obj.yieldEnergy || obj.ePv || obj.energy || obj.pvEnergy || 0;
 
-                document.getElementById('stat-week').innerText = Math.round(weekSum);
-                document.getElementById('stat-month').innerText = Math.round(monthSum);
+                    const today = getVal(list[list.length - 1]);
+                    const week = list.slice(-7).reduce((a, b) => a + getVal(b), 0);
+                    const month = list.slice(-30).reduce((a, b) => a + getVal(b), 0);
+
+                    document.getElementById('stat-day').innerText = Math.round(today);
+                    document.getElementById('stat-week').innerText = Math.round(week);
+                    document.getElementById('stat-month').innerText = Math.round(month);
+                }
+
+                document.getElementById('timestamp').innerText = "Uppdaterat: " + new Date().toLocaleTimeString();
+            } catch (e) {
+                document.getElementById('timestamp').innerText = "Fel vid hämtning";
             }
-            
-            document.getElementById('timestamp').innerText = "Uppdaterat: " + new Date().toLocaleTimeString();
         }
 
-        updateStats();
-        setInterval(updateStats, 60000); // Uppdatera en gång i minuten
+        updateData();
+        setInterval(updateData, 30000);
     </script>
 </body>
 </html>
