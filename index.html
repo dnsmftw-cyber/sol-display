@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tegskiftet Solenergi</title>
+    <title>Tegskiftet Dashboard</title>
     <style>
         body { 
             background: #000; 
@@ -16,21 +16,54 @@
             height: 100vh; 
             margin: 0;
         }
-        .label { font-size: 2rem; color: #666; text-transform: uppercase; letter-spacing: 5px; }
-        .value { font-size: 15rem; font-weight: 900; color: #00ff88; line-height: 1; }
-        .unit { font-size: 4rem; color: #00ff88; }
-        .footer { position: fixed; bottom: 20px; color: #444; font-size: 1rem; }
+        .main-display { text-align: center; margin-bottom: 40px; }
+        .label { font-size: 1.5rem; color: #666; text-transform: uppercase; letter-spacing: 3px; }
+        .value-large { font-size: 12rem; font-weight: 900; color: #00ff88; line-height: 1; }
+        .unit-large { font-size: 3rem; color: #00ff88; }
+
+        /* De nya raderna */
+        .stats-grid { 
+            display: flex; 
+            gap: 40px; 
+            border-top: 1px solid #222; 
+            padding-top: 30px;
+            width: 80%;
+            justify-content: space-around;
+        }
+        .stat-box { text-align: center; }
+        .stat-label { font-size: 1rem; color: #888; text-transform: uppercase; margin-bottom: 5px; }
+        .stat-value { font-size: 3.5rem; font-weight: bold; color: #fff; }
+        .stat-unit { font-size: 1.2rem; color: #fff; opacity: 0.6; }
+
+        .footer { position: fixed; bottom: 15px; color: #333; font-size: 0.8rem; }
     </style>
 </head>
 <body>
 
-    <div class="label">Produktion Just Nu</div>
-    <div id="prod-value" class="value">0.0</div>
-    <div class="unit">kW</div>
-    <div id="timestamp" class="footer">Ansluter...</div>
+    <div class="main-display">
+        <div class="label">Just nu</div>
+        <div id="current-prod" class="value-large">0.0</div>
+        <div class="unit-large">kW</div>
+    </div>
+
+    <div class="stats-grid">
+        <div class="stat-box">
+            <div class="stat-label">Idag</div>
+            <div><span id="stat-day" class="stat-value">0</span> <span class="stat-unit">kWh</span></div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-label">Vecka</div>
+            <div><span id="stat-week" class="stat-value">0</span> <span class="stat-unit">kWh</span></div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-label">Månad</div>
+            <div><span id="stat-month" class="stat-value">0</span> <span class="stat-unit">kWh</span></div>
+        </div>
+    </div>
+
+    <div id="timestamp" class="footer">Uppdaterar...</div>
 
     <script>
-        // --- KONFIGURATION ---
         const CONFIG = {
             account: 'tegskiftetlandskrona@gmail.com',
             password: 'Tegskiftet1',
@@ -42,69 +75,67 @@
 
         let authToken = "";
 
-        // --- FUNKTIONER ---
+        async function apiRequest(endpoint, method = 'GET', body = null) {
+            const url = CONFIG.proxy + encodeURIComponent(CONFIG.apiBase + endpoint);
+            const options = {
+                method: method,
+                headers: { 'Content-Type': 'application/json' }
+            };
+            if (authToken) options.headers['Authorization'] = 'Bearer ' + authToken;
+            if (body) options.body = JSON.stringify(body);
+            
+            const response = await fetch(url, options);
+            if (response.status === 401) { authToken = ""; return null; }
+            return await response.json();
+        }
+
         async function login() {
-            try {
-                const targetUrl = CONFIG.apiBase + '/auth/login/password';
-                const proxyUrl = CONFIG.proxy + encodeURIComponent(targetUrl);
-                
-                const response = await fetch(proxyUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        account: CONFIG.account,
-                        password: CONFIG.password
-                    })
-                });
-                
-                const res = await response.json();
-                if (res.data && res.data.token) {
-                    authToken = res.data.token;
-                    return true;
-                }
-                document.getElementById('timestamp').innerText = "Login misslyckades: " + (res.msg || "Kolla konto");
-                return false;
-            } catch (e) {
-                document.getElementById('timestamp').innerText = "Kunde inte nå inloggningsservern";
-                return false;
+            const res = await apiRequest('/auth/login/password', 'POST', {
+                account: CONFIG.account,
+                password: CONFIG.password
+            });
+            if (res && res.data && res.data.token) {
+                authToken = res.data.token;
+                return true;
             }
+            return false;
         }
 
-        async function updateDisplay() {
-            if (!authToken) {
-                const success = await login();
-                if (!success) return;
+        async function updateStats() {
+            if (!authToken && !(await login())) return;
+
+            // 1. Hämta realtidsinfo (kW just nu)
+            const realRes = await apiRequest('/systems/' + CONFIG.systemId + '/devices/' + CONFIG.serial + '/realtimeInfo');
+            if (realRes && realRes.data) {
+                const kw = ((realRes.data.p_pv || 0) / 1000).toFixed(1);
+                document.getElementById('current-prod').innerText = kw;
             }
 
-            try {
-                const targetUrl = CONFIG.apiBase + '/systems/' + CONFIG.systemId + '/devices/' + CONFIG.serial + '/realtimeInfo';
-                const proxyUrl = CONFIG.proxy + encodeURIComponent(targetUrl);
+            // 2. Hämta statistik (kWh över tid)
+            // Vi hämtar dygnsstatistik för att räkna ut dag, vecka, månad
+            const statRes = await apiRequest('/systems/' + CONFIG.systemId + '/energy/statistics?type=day');
+            if (statRes && statRes.data) {
+                // Här behöver vi titta på hur Sigenergy strukturerar sin lista.
+                // Vi antar här att den skickar en lista med de senaste dagarna.
+                const days = statRes.data || [];
+                
+                // Idag (sista elementet i listan)
+                const todayVal = days.length > 0 ? (days[days.length - 1].yieldEnergy || 0) : 0;
+                document.getElementById('stat-day').innerText = Math.round(todayVal);
 
-                const response = await fetch(proxyUrl, {
-                    headers: { 
-                        'Authorization': 'Bearer ' + authToken,
-                        'Content-Type': 'application/json'
-                    }
-                });
+                // Enkel summering för vecka (senaste 7) och månad (senaste 30)
+                const weekSum = days.slice(-7).reduce((acc, curr) => acc + (curr.yieldEnergy || 0), 0);
+                const monthSum = days.slice(-30).reduce((acc, curr) => acc + (curr.yieldEnergy || 0), 0);
 
-                if (response.status === 401) {
-                    authToken = "";
-                    return;
-                }
-
-                const res = await response.json();
-                if (res.data) {
-                    const watts = res.data.p_pv || 0; 
-                    const kw = (watts / 1000).toFixed(1);
-                    document.getElementById('prod-value').innerText = kw;
-                    document.getElementById('timestamp').innerText = "Uppdaterat: " + new Date().toLocaleTimeString();
-                } else {
-                    document.getElementById('timestamp').innerText = "Ingen data i svaret";
-                }
-            } catch (e) {
-                document.getElementById('timestamp').innerText = "Datafel: " + e.message;
+                document.getElementById('stat-week').innerText = Math.round(weekSum);
+                document.getElementById('stat-month').innerText = Math.round(monthSum);
             }
+            
+            document.getElementById('timestamp').innerText = "Uppdaterat: " + new Date().toLocaleTimeString();
         }
 
-        // Starta direkt
-        updateDisplay().catch(err => {
+        updateStats();
+        setInterval(updateStats, 60000); // Uppdatera en gång i minuten
+    </script>
+</body>
+</html>
