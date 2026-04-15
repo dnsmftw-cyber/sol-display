@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tegskiftet Solenergi</title>
+    <style>
+        body { 
+            background: #000; 
+            color: #fff; 
+            font-family: 'Inter', sans-serif; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            justify-content: center; 
+            height: 100vh; 
+            margin: 0;
+            overflow: hidden;
+        }
+        .container { text-align: center; }
+        .label { font-size: 2.5rem; color: #666; text-transform: uppercase; letter-spacing: 5px; margin-bottom: 20px; }
+        .value { font-size: 18rem; font-weight: 900; color: #00ff88; line-height: 0.8; }
+        .unit { font-size: 5rem; color: #00ff88; font-weight: 300; margin-top: 10px; }
+        .footer { position: fixed; bottom: 40px; color: #222; font-size: 1.2rem; width: 100%; text-align: center; }
+        #timestamp { color: #444; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <div class="label">Produktion Just Nu</div>
+        <div id="prod-value" class="value">---</div>
+        <div class="unit">kW</div>
+    </div>
+
+    <div class="footer">
+        Brf Tegskiftet | <span id="timestamp">Ansluter till SigenCloud...</span>
+    </div>
+
+    <script>
+        const CONFIG = {
+            account: 'tegskiftetlandskrona@gmail.com',
+            password: 'Tegskiftet1',
+            systemId: 'EPTWN1772141873',
+            serial: 'CMU110A22640030',
+            baseUrl: 'https://openapi.sigencloud.com/openapi'
+        };
+
+        let authToken = "";
+
+        async function login() {
+            try {
+                const response = await fetch(`${CONFIG.baseUrl}/auth/login/password`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        account: CONFIG.account,
+                        password: CONFIG.password
+                    })
+                });
+                const res = await response.json();
+                if (res.data && res.data.token) {
+                    authToken = res.data.token;
+                    return true;
+                }
+            } catch (e) {
+                console.error("Inloggningsfel:", e);
+                document.getElementById('timestamp').innerText = "Inloggningsfel";
+            }
+            return false;
+        }
+
+        async function updateDisplay() {
+            if (!authToken) {
+                const success = await login();
+                if (!success) return;
+            }
+
+            try {
+                const url = `${CONFIG.baseUrl}/systems/${CONFIG.systemId}/devices/${CONFIG.serial}/realtimeInfo`;
+                const response = await fetch(url, {
+                    headers: { 
+                        'Authorization': `Bearer ${authToken}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                if (response.status === 401) {
+                    authToken = ""; // Token har gått ut
+                    return;
+                }
+
+                const res = await response.json();
+                
+                if (res.data) {
+                    // Vi hämtar p_pv (solproduktion i Watt)
+                    const watts = res.data.p_pv || 0; 
+                    const kw = (watts / 1000).toFixed(1);
+                    
+                    document.getElementById('prod-value').innerText = kw;
+                    document.getElementById('timestamp').innerText = "Senast uppdaterat: " + new Date().toLocaleTimeString();
+                }
+            } catch (e) {
+                document.getElementById('timestamp').innerText = "Kunde inte hämta data";
+                console.error("Datafel:", e);
+            }
+        }
+
+        // Kör direkt vid start
+        updateDisplay();
+
+        // Uppdatera var 20:e sekund för skön "realtidskänsla" i trapphuset
+        setInterval(updateDisplay, 20000);
+
+        // Tvinga ny inloggning var 6:e timme
+        setInterval(() => { authToken = ""; }, 21600000);
+    </script>
+</body>
+</html>
