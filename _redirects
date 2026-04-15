@@ -1,1 +1,1 @@
-/api/* https://eu5.sigencloud.com/openapi/:splat  200
+api/* https://eu5.sigencloud.com/openapi/:splat 200
