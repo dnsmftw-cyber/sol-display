@@ -1,23 +1,22 @@
-
-
 <script>
     const CONFIG = {
         account: 'tegskiftetlandskrona@gmail.com',
         password: 'Tegskiftet1',
         systemId: 'EPTWN1772141873',
         serial: 'CMU110A22640030',
-        // Vi lägger till en proxy framför URL:en för att slippa CORS-problem
-        baseUrl: 'https://corsproxy.io/?' + encodeURIComponent('https://openapi.sigencloud.com/openapi')
+        // Vi testar EU-servern istället för den generella
+        apiBase: 'https://eu5.sigencloud.com/openapi', 
+        proxy: 'https://corsproxy.io/?'
     };
 
     let authToken = "";
 
     async function login() {
         try {
-            // Vi måste koda om hela URL:en för proxyn
-            const loginUrl = 'https://corsproxy.io/?' + encodeURIComponent('https://openapi.sigencloud.com/openapi/auth/login/password');
+            const targetUrl = `${CONFIG.apiBase}/auth/login/password`;
+            const proxyUrl = CONFIG.proxy + encodeURIComponent(targetUrl);
             
-            const response = await fetch(loginUrl, {
+            const response = await fetch(proxyUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -25,16 +24,19 @@
                     password: CONFIG.password
                 })
             });
+            
             const res = await response.json();
             if (res.data && res.data.token) {
                 authToken = res.data.token;
                 return true;
+            } else {
+                document.getElementById('timestamp').innerText = "Fel: " + (res.msg || "Kolla lösenord");
+                return false;
             }
         } catch (e) {
-            console.error("Inloggningsfel:", e);
-            document.getElementById('timestamp').innerText = "Inloggningsfel (CORS?)";
+            document.getElementById('timestamp').innerText = "Kunde inte nå servern";
+            return false;
         }
-        return false;
     }
 
     async function updateDisplay() {
@@ -44,8 +46,8 @@
         }
 
         try {
-            const rawUrl = `https://openapi.sigencloud.com/openapi/systems/${CONFIG.systemId}/devices/${CONFIG.serial}/realtimeInfo`;
-            const proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(rawUrl);
+            const targetUrl = `${CONFIG.apiBase}/systems/${CONFIG.systemId}/devices/${CONFIG.serial}/realtimeInfo`;
+            const proxyUrl = CONFIG.proxy + encodeURIComponent(targetUrl);
 
             const response = await fetch(proxyUrl, {
                 headers: { 
@@ -55,14 +57,13 @@
             });
 
             if (response.status === 401) {
-                authToken = ""; 
+                authToken = "";
                 return;
             }
 
             const res = await response.json();
-            
             if (res.data) {
-                // Sigen kan ibland svara med olika fält, p_pv är vanligast för produktion
+                // Sigen kan skicka data i p_pv (Watt)
                 const watts = res.data.p_pv || 0; 
                 const kw = (watts / 1000).toFixed(1);
                 
@@ -70,11 +71,10 @@
                 document.getElementById('timestamp').innerText = "Uppdaterat: " + new Date().toLocaleTimeString();
             }
         } catch (e) {
-            document.getElementById('timestamp').innerText = "Kunde inte hämta data";
+            document.getElementById('timestamp').innerText = "Datafel: " + e.message;
         }
     }
 
     updateDisplay();
     setInterval(updateDisplay, 20000);
-    setInterval(() => { authToken = ""; }, 21600000);
 </script>
