@@ -1,80 +1,110 @@
-<script>
-    const CONFIG = {
-        account: 'tegskiftetlandskrona@gmail.com',
-        password: 'Tegskiftet1',
-        systemId: 'EPTWN1772141873',
-        serial: 'CMU110A22640030',
-        // Vi testar EU-servern istället för den generella
-        apiBase: 'https://eu5.sigencloud.com/openapi', 
-        proxy: 'https://corsproxy.io/?'
-    };
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tegskiftet Solenergi</title>
+    <style>
+        body { 
+            background: #000; 
+            color: #fff; 
+            font-family: sans-serif; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            justify-content: center; 
+            height: 100vh; 
+            margin: 0;
+        }
+        .label { font-size: 2rem; color: #666; text-transform: uppercase; letter-spacing: 5px; }
+        .value { font-size: 15rem; font-weight: 900; color: #00ff88; line-height: 1; }
+        .unit { font-size: 4rem; color: #00ff88; }
+        .footer { position: fixed; bottom: 20px; color: #444; font-size: 1rem; }
+    </style>
+</head>
+<body>
 
-    let authToken = "";
+    <div class="label">Produktion Just Nu</div>
+    <div id="prod-value" class="value">0.0</div>
+    <div class="unit">kW</div>
+    <div id="timestamp" class="footer">Ansluter...</div>
 
-    async function login() {
-        try {
-            const targetUrl = `${CONFIG.apiBase}/auth/login/password`;
-            const proxyUrl = CONFIG.proxy + encodeURIComponent(targetUrl);
-            
-            const response = await fetch(proxyUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    account: CONFIG.account,
-                    password: CONFIG.password
-                })
-            });
-            
-            const res = await response.json();
-            if (res.data && res.data.token) {
-                authToken = res.data.token;
-                return true;
-            } else {
-                document.getElementById('timestamp').innerText = "Fel: " + (res.msg || "Kolla lösenord");
+    <script>
+        // --- KONFIGURATION ---
+        const CONFIG = {
+            account: 'tegskiftetlandskrona@gmail.com',
+            password: 'Tegskiftet1',
+            systemId: 'EPTWN1772141873',
+            serial: 'CMU110A22640030',
+            apiBase: 'https://eu5.sigencloud.com/openapi', 
+            proxy: 'https://corsproxy.io/?'
+        };
+
+        let authToken = "";
+
+        // --- FUNKTIONER ---
+        async function login() {
+            try {
+                const targetUrl = CONFIG.apiBase + '/auth/login/password';
+                const proxyUrl = CONFIG.proxy + encodeURIComponent(targetUrl);
+                
+                const response = await fetch(proxyUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        account: CONFIG.account,
+                        password: CONFIG.password
+                    })
+                });
+                
+                const res = await response.json();
+                if (res.data && res.data.token) {
+                    authToken = res.data.token;
+                    return true;
+                }
+                document.getElementById('timestamp').innerText = "Login misslyckades: " + (res.msg || "Kolla konto");
+                return false;
+            } catch (e) {
+                document.getElementById('timestamp').innerText = "Kunde inte nå inloggningsservern";
                 return false;
             }
-        } catch (e) {
-            document.getElementById('timestamp').innerText = "Kunde inte nå servern";
-            return false;
-        }
-    }
-
-    async function updateDisplay() {
-        if (!authToken) {
-            const success = await login();
-            if (!success) return;
         }
 
-        try {
-            const targetUrl = `${CONFIG.apiBase}/systems/${CONFIG.systemId}/devices/${CONFIG.serial}/realtimeInfo`;
-            const proxyUrl = CONFIG.proxy + encodeURIComponent(targetUrl);
+        async function updateDisplay() {
+            if (!authToken) {
+                const success = await login();
+                if (!success) return;
+            }
 
-            const response = await fetch(proxyUrl, {
-                headers: { 
-                    'Authorization': `Bearer ${authToken}`,
-                    'Content-Type': 'application/json'
+            try {
+                const targetUrl = CONFIG.apiBase + '/systems/' + CONFIG.systemId + '/devices/' + CONFIG.serial + '/realtimeInfo';
+                const proxyUrl = CONFIG.proxy + encodeURIComponent(targetUrl);
+
+                const response = await fetch(proxyUrl, {
+                    headers: { 
+                        'Authorization': 'Bearer ' + authToken,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                if (response.status === 401) {
+                    authToken = "";
+                    return;
                 }
-            });
 
-            if (response.status === 401) {
-                authToken = "";
-                return;
+                const res = await response.json();
+                if (res.data) {
+                    const watts = res.data.p_pv || 0; 
+                    const kw = (watts / 1000).toFixed(1);
+                    document.getElementById('prod-value').innerText = kw;
+                    document.getElementById('timestamp').innerText = "Uppdaterat: " + new Date().toLocaleTimeString();
+                } else {
+                    document.getElementById('timestamp').innerText = "Ingen data i svaret";
+                }
+            } catch (e) {
+                document.getElementById('timestamp').innerText = "Datafel: " + e.message;
             }
-
-            const res = await response.json();
-            if (res.data) {
-                // Sigen kan skicka data i p_pv (Watt)
-                const watts = res.data.p_pv || 0; 
-                const kw = (watts / 1000).toFixed(1);
-                
-                document.getElementById('prod-value').innerText = kw;
-                document.getElementById('timestamp').innerText = "Uppdaterat: " + new Date().toLocaleTimeString();
-            }
-        } catch (e) {
-            document.getElementById('timestamp').innerText = "Datafel: " + e.message;
         }
-    }
 
-    updateDisplay();
-    setInterval(updateDisplay, 20000);
-</script>
+        // Starta direkt
+        updateDisplay().catch(err => {
