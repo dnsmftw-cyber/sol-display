@@ -3,54 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tegskiftet Solenergi Dashboard</title>
+    <title>Tegskiftet Dashboard</title>
     <style>
-        body { 
-            background: #000; 
-            color: #fff; 
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
-            display: flex; 
-            flex-direction: column; 
-            align-items: center; 
-            justify-content: center; 
-            height: 100vh; 
-            margin: 0;
-            overflow: hidden;
-        }
+        body { background: #000; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; overflow: hidden; }
         .main-display { text-align: center; margin-bottom: 30px; }
-        .label { font-size: 1.5rem; color: #555; text-transform: uppercase; letter-spacing: 3px; }
+        .label { font-size: 1.5rem; color: #444; text-transform: uppercase; letter-spacing: 3px; }
         .value-large { font-size: 15rem; font-weight: 900; color: #00ff88; line-height: 0.8; }
         .unit-large { font-size: 3rem; color: #00ff88; }
-
-        .stats-grid { 
-            display: flex; 
-            gap: 20px; 
-            border-top: 1px solid #111; 
-            padding-top: 30px; 
-            width: 95%; 
-            justify-content: space-around; 
-        }
-        .stat-box { 
-            text-align: center; 
-            background: #080808; 
-            padding: 25px; 
-            border-radius: 15px; 
-            min-width: 200px; 
-            border: 1px solid #111; 
-        }
-        .stat-label { font-size: 1rem; color: #666; text-transform: uppercase; margin-bottom: 10px; letter-spacing: 1px; }
-        .stat-value { font-size: 4rem; font-weight: bold; color: #fff; }
-        .stat-unit { font-size: 1.2rem; color: #444; margin-left: 5px; }
-
-        .footer { 
-            position: fixed; 
-            bottom: 20px; 
-            color: #444; 
-            font-size: 1rem; 
-            background: rgba(20,20,20,0.8); 
-            padding: 8px 25px; 
-            border-radius: 30px; 
-        }
+        .stats-grid { display: flex; gap: 20px; border-top: 1px solid #111; padding-top: 25px; width: 95%; justify-content: space-around; }
+        .stat-box { text-align: center; background: #080808; padding: 20px; border-radius: 15px; min-width: 180px; border: 1px solid #111; }
+        .stat-label { font-size: 0.9rem; color: #666; text-transform: uppercase; margin-bottom: 8px; }
+        .stat-value { font-size: 3.5rem; font-weight: bold; color: #fff; }
+        .stat-unit { font-size: 1rem; color: #333; margin-left: 5px; }
+        .footer { position: fixed; bottom: 20px; color: #555; font-size: 1rem; background: #111; padding: 5px 20px; border-radius: 20px; }
     </style>
 </head>
 <body>
@@ -67,16 +32,16 @@
             <div><span id="stat-day" class="stat-value">0</span><span class="stat-unit">kWh</span></div>
         </div>
         <div class="stat-box">
-            <div class="stat-label">Senaste 7 dagarna</div>
+            <div class="stat-label">7 dagar</div>
             <div><span id="stat-week" class="stat-value">0</span><span class="stat-unit">kWh</span></div>
         </div>
         <div class="stat-box">
-            <div class="stat-label">Senaste 30 dagarna</div>
+            <div class="stat-label">30 dagar</div>
             <div><span id="stat-month" class="stat-value">0</span><span class="stat-unit">kWh</span></div>
         </div>
     </div>
 
-    <div id="status-text" class="footer">Ansluter till Brf Tegskiftet...</div>
+    <div id="status-text" class="footer">Initierar anslutning...</div>
 
     <script>
         const CONFIG = {
@@ -84,113 +49,76 @@
             password: 'Tegskiftet1',
             systemId: 'EPTWN1772141873',
             serial: 'CMU110A22640030',
-            apiBase: 'https://eu5.sigencloud.com/openapi', 
-            proxy: 'https://api.allorigins.win/get?url='
+            apiBase: 'https://eu5.sigencloud.com/openapi',
+            // Vi använder en mer kraftfull proxy för att hantera POST-anrop
+            proxy: 'https://thingproxy.freeboard.io/fetch/' 
         };
 
         let authToken = "";
 
-        function updateStatus(msg) {
-            document.getElementById('status-text').innerText = msg;
-        }
-
-        // Specialfunktion för att hantera AllOrigins märkliga sätt att svara
-        async function proxyFetch(targetUrl, method = 'GET', body = null) {
-            const fullUrl = CONFIG.proxy + encodeURIComponent(targetUrl);
-            
-            // Vi kan inte skicka headers direkt till AllOrigins, så vi skickar dem i URL-anropet om det behövs
-            // Men AllOrigins stöder oftast bara GET. För POST (login) provar vi en direkt fetch först.
-            
-            const options = { 
-                method: method,
-                headers: { 'Accept': 'application/json' }
+        async function sigenRequest(path, method = 'GET', data = null) {
+            const url = CONFIG.proxy + CONFIG.apiBase + path;
+            const headers = {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json'
             };
-            
-            if (authToken) options.headers['Authorization'] = 'Bearer ' + authToken;
-            if (body) {
-                options.headers['Content-Type'] = 'application/json';
-                options.body = JSON.stringify(body);
-            }
+            if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
 
-            const response = await fetch(fullUrl);
-            const wrapper = await response.json();
-            
-            // Svaret ligger som en textsträng i .contents
-            return JSON.parse(wrapper.contents);
+            const response = await fetch(url, {
+                method: method,
+                headers: headers,
+                body: data ? JSON.stringify(data) : null
+            });
+
+            if (!response.ok) throw new Error("HTTP " + response.status);
+            return await response.json();
         }
 
-        async function login() {
-            updateStatus("Loggar in på SigenCloud...");
+        async function update() {
             try {
-                // Login kräver POST, så vi skickar med body
-                const res = await proxyFetch(CONFIG.apiBase + '/auth/login/password', 'POST', {
-                    account: CONFIG.account,
-                    password: CONFIG.password
-                });
-                
-                if (res && res.data && res.data.token) {
-                    authToken = res.data.token;
-                    return true;
-                } else {
-                    updateStatus("Login misslyckades. Kontrollera uppgifter.");
-                    return false;
+                // 1. Logga in om token saknas
+                if (!authToken) {
+                    document.getElementById('status-text').innerText = "Loggar in...";
+                    const loginRes = await sigenRequest('/auth/login/password', 'POST', {
+                        account: CONFIG.account,
+                        password: CONFIG.password
+                    });
+                    if (loginRes.data && loginRes.data.token) {
+                        authToken = loginRes.data.token;
+                    } else {
+                        throw new Error("Login misslyckades");
+                    }
                 }
+
+                // 2. Hämta Realtid
+                document.getElementById('status-text').innerText = "Hämtar effekt...";
+                const realRes = await sigenRequest('/systems/' + CONFIG.systemId + '/devices/' + CONFIG.serial + '/realtimeInfo');
+                if (realRes.data) {
+                    document.getElementById('current-prod').innerText = (realRes.data.pvPower || 0).toFixed(1);
+                }
+
+                // 3. Hämta Statistik
+                document.getElementById('status-text').innerText = "Hämtar statistik...";
+                const statRes = await sigenRequest('/systems/' + CONFIG.systemId + '/energy/statistics?type=day');
+                const list = statRes.data?.itemList || [];
+                
+                if (list.length > 0) {
+                    const getVal = (i) => i.powerGeneration || 0;
+                    document.getElementById('stat-day').innerText = Math.round(getVal(list[list.length - 1]));
+                    document.getElementById('stat-week').innerText = Math.round(list.slice(-7).reduce((a, b) => a + getVal(b), 0));
+                    document.getElementById('stat-month').innerText = Math.round(list.slice(-30).reduce((a, b) => a + getVal(b), 0));
+                }
+
+                document.getElementById('status-text').innerText = "Uppdaterat " + new Date().toLocaleTimeString();
+
             } catch (e) {
-                updateStatus("Kunde inte ansluta till proxyn.");
-                console.error(e);
-                return false;
+                document.getElementById('status-text').innerText = "Väntar på kontakt: " + e.message;
+                authToken = ""; // Nollställ vid fel
             }
         }
 
-        async function updateData() {
-            if (!authToken) {
-                const loggedIn = await login();
-                if (!loggedIn) return;
-            }
-
-            try {
-                // 1. Hämta Produktion Just Nu (kW)
-                updateStatus("Hämtar effekt...");
-                const realRes = await proxyFetch(CONFIG.apiBase + '/systems/' + CONFIG.systemId + '/devices/' + CONFIG.serial + '/realtimeInfo');
-                
-                if (realRes && realRes.data) {
-                    const kw = (realRes.data.pvPower || 0).toFixed(1);
-                    document.getElementById('current-prod').innerText = kw;
-                }
-
-                // 2. Hämta Statistik (kWh)
-                updateStatus("Hämtar historik...");
-                const statRes = await proxyFetch(CONFIG.apiBase + '/systems/' + CONFIG.systemId + '/energy/statistics?type=day');
-                
-                // Navigera till itemList enligt din dokumentation
-                const list = statRes.data?.itemList || statRes.data || [];
-                
-                if (Array.isArray(list) && list.length > 0) {
-                    const getVal = (item) => item.powerGeneration || 0;
-                    
-                    const today = getVal(list[list.length - 1]);
-                    const week = list.slice(-7).reduce((acc, curr) => acc + getVal(curr), 0);
-                    const month = list.slice(-30).reduce((acc, curr) => acc + getVal(curr), 0);
-
-                    document.getElementById('stat-day').innerText = Math.round(today);
-                    document.getElementById('stat-week').innerText = Math.round(week);
-                    document.getElementById('stat-month').innerText = Math.round(month);
-                    
-                    updateStatus("Uppdaterat: " + new Date().toLocaleTimeString());
-                } else {
-                    updateStatus("Ingen historik hittades i systemet.");
-                }
-            } catch (e) {
-                updateStatus("Ett fel uppstod vid hämtning.");
-                authToken = ""; // Nollställ token för att tvinga ny inloggning nästa gång
-            }
-        }
-
-        // Kör direkt
-        updateData();
-
-        // Uppdatera var 30:e sekund
-        setInterval(updateData, 30000);
+        update();
+        setInterval(update, 30000);
     </script>
 </body>
 </html>
